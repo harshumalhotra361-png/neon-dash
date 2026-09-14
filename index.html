@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>NEON DASH - Shrey Malhotra</title>
+
+<style>
+*{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+  -webkit-tap-highlight-color:transparent;
+}
+
+body{
+  background:#050510;
+  color:white;
+  font-family:Arial,sans-serif;
+  overflow:hidden;
+  touch-action:none;
+}
+
+#game{
+  position:fixed;
+  inset:0;
+  width:100%;
+  height:100%;
+}
+
+#watermark{
+  position:fixed;
+  top:12px;
+  left:12px;
+  z-index:10;
+  font-size:12px;
+  font-weight:bold;
+  letter-spacing:2px;
+  color:white;
+  text-shadow:0 0 8px #00eaff;
+}
+
+#stats{
+  position:fixed;
+  top:12px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:10;
+  display:flex;
+  gap:15px;
+  font-size:14px;
+  font-weight:bold;
+}
+
+#menu,#gameOver{
+  position:fixed;
+  inset:0;
+  z-index:20;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  text-align:center;
+  background:rgba(3,3,15,.94);
+}
+
+#gameOver{
+  display:none;
+}
+
+h1{
+  font-size:48px;
+  letter-spacing:5px;
+  color:#00eaff;
+  text-shadow:0 0 12px #00eaff;
+  margin-bottom:12px;
+}
+
+.subtitle{
+  color:#bbb;
+  margin-bottom:25px;
+}
+
+button{
+  border:2px solid #00eaff;
+  background:#071923;
+  color:white;
+  padding:14px 30px;
+  border-radius:12px;
+  font-size:18px;
+  font-weight:bold;
+  box-shadow:0 0 15px rgba(0,234,255,.4);
+}
+
+#joystick{
+  position:fixed;
+  z-index:15;
+  left:25px;
+  bottom:25px;
+  width:130px;
+  height:130px;
+  border:3px solid rgba(0,234,255,.5);
+  border-radius:50%;
+  background:rgba(0,234,255,.08);
+  display:none;
+}
+
+#joystickKnob{
+  position:absolute;
+  width:56px;
+  height:56px;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  background:#00eaff;
+  box-shadow:0 0 18px #00eaff;
+}
+
+.small{
+  margin-top:12px;
+  color:#888;
+  font-size:12px;
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="watermark">SHREY MALHOTRA</div>
+
+<div id="stats">
+  <span>⭐ <b id="score">0</b></span>
+  <span>💎 <b id="coins">0</b></span>
+  <span>🏆 <b id="best">0</b></span>
+</div>
+
+<div id="menu">
+  <h1>NEON DASH</h1>
+  <div class="subtitle">Created by Shrey Malhotra 🎮</div>
+  <button id="play">PLAY NOW</button>
+  <div class="small">Drag the joystick to move</div>
+</div>
+
+<div id="gameOver">
+  <h1>GAME OVER</h1>
+  <div class="subtitle">
+    Score: <b id="finalScore">0</b><br>
+    💎 Diamonds: <b id="finalCoins">0</b>
+  </div>
+  <button id="again">PLAY AGAIN</button>
+</div>
+
+<div id="joystick">
+  <div id="joystickKnob"></div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+const scoreEl=document.getElementById("score");
+const coinsEl=document.getElementById("coins");
+const bestEl=document.getElementById("best");
+
+const menu=document.getElementById("menu");
+const gameOver=document.getElementById("gameOver");
+const playBtn=document.getElementById("play");
+const againBtn=document.getElementById("again");
+
+const joystick=document.getElementById("joystick");
+const knob=document.getElementById("joystickKnob");
+
+let W,H;
+let running=false;
+let score=0;
+let coins=0;
+let speed=260;
+let spawnTimer=0;
+let coinTimer=0;
+let lastTime=0;
+
+let joystickX=0;
+let joystickActive=false;
+
+let best=Number(localStorage.getItem("neonDashBest")||0);
+bestEl.textContent=best;
+
+const player={
+  x:0,
+  y:0,
+  w:42,
+  h:42
+};
+
+let obstacles=[];
+let diamonds=[];
+let particles=[];
+let stars=[];
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+
+  player.y=H-150;
+
+  stars=[];
+  for(let i=0;i<90;i++){
+    stars.push({
+      x:Math.random()*W,
+      y:Math.random()*H,
+      s:Math.random()*2+1
+    });
+  }
+}
+
+window.addEventListener("resize",resize);
+resize();
+
+function resetGame(){
+  score=0;
+  coins=0;
+  speed=260;
+  spawnTimer=0;
+  coinTimer=0;
+  obstacles=[];
+  diamonds=[];
+  particles=[];
+
+  player.x=W/2-player.w/2;
+  player.y=H-150;
+
+  scoreEl.textContent=0;
+  coinsEl.textContent=0;
+
+  menu.style.display="none";
+  gameOver.style.display="none";
+  joystick.style.display="block";
+
+  running=true;
+  lastTime=performance.now();
+  requestAnimationFrame(loop);
+}
+
+function spawnObstacle(){
+  const w=35+Math.random()*45;
+
+  obstacles.push({
+    x:Math.random()*(W-w),
+    y:-60,
+    w:w,
+    h:25+Math.random()*35
+  });
+}
+
+function spawnDiamond(){
+  diamonds.push({
+    x:25+Math.random()*(W-50),
+    y:-30,
+    r:10
+  });
+}
+
+function createParticles(x,y,count=12){
+  for(let i=0;i<count;i++){
+    particles.push({
+      x:x,
+      y:y,
+      vx:(Math.random()-.5)*250,
+      vy:(Math.random()-.5)*250,
+      life:.7
+    });
+  }
+}
+
+function collision(a,b){
+  return a.x < b.x+b.w &&
+         a.x+a.w > b.x &&
+         a.y < b.y+b.h &&
+         a.y+a.h > b.y;
+}
+
+function update(dt){
+  if(!running)return;
+
+  score+=dt*10;
+  speed+=dt*5;
+
+  scoreEl.textContent=Math.floor(score);
+
+  player.x+=joystickX*430*dt;
+
+  if(player.x<0)player.x=0;
+  if(player.x>W-player.w)player.x=W-player.w;
+
+  spawnTimer-=dt;
+  coinTimer-=dt;
+
+  if(spawnTimer<=0){
+    spawnObstacle();
+    spawnTimer=Math.max(.35,1.05-speed/1000);
+  }
+
+  if(coinTimer<=0){
+    spawnDiamond();
+    coinTimer=1.4;
+  }
+
+  obstacles.forEach(o=>o.y+=speed*dt);
+  diamonds.forEach(d=>d.y+=speed*dt);
+
+  for(let i=obstacles.length-1;i>=0;i--){
+    const o=obstacles[i];
+
+    if(collision(player,o)){
+      createParticles(player.x+player.w/2,player.y+player.h/2,25);
+      endGame();
+      return;
+    }
+
+    if(o.y>H+80){
+      obstacles.splice(i,1);
+    }
+  }
+
+  for(let i=diamonds.length-1;i>=0;i--){
+    const d=diamonds[i];
+
+    const box={
+      x:d.x-d.r,
+      y:d.y-d.r,
+      w:d.r*2,
+      h:d.r*2
+    };
+
+    if(collision(player,box)){
+      coins++;
+      score+=50;
+      coinsEl.textContent=coins;
+      createParticles(d.x,d.y,10);
+      diamonds.splice(i,1);
+    }else if(d.y>H+50){
+      diamonds.splice(i,1);
+    }
+  }
+
+  particles.forEach(p=>{
+    p.x+=p.vx*dt;
+    p.y+=p.vy*dt;
+    p.life-=dt;
+  });
+
+  particles=particles.filter(p=>p.life>0);
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  ctx.fillStyle="#050510";
+  ctx.fillRect(0,0,W,H);
+
+  // Stars
+  ctx.fillStyle="#ffffff";
+
+  stars.forEach(s=>{
+    ctx.globalAlpha=.5;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+  });
+
+  ctx.globalAlpha=1;
+
+  // Lanes
+  ctx.strokeStyle="rgba(0,234,255,.08)";
+  ctx.lineWidth=2;
+
+  for(let i=1;i<4;i++){
+    const x=W*i/4;
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,H);
+    ctx.stroke();
+  }
+
+  // Player
+  ctx.shadowBlur=18;
+  ctx.shadowColor="#00eaff";
+  ctx.fillStyle="#00eaff";
+  ctx.fillRect(player.x,player.y,player.w,player.h);
+
+  ctx.shadowBlur=0;
+
+  // Obstacles
+  obstacles.forEach(o=>{
+    ctx.shadowBlur=15;
+    ctx.shadowColor="#ff1744";
+    ctx.fillStyle="#ff1744";
+    ctx.fillRect(o.x,o.y,o.w,o.h);
+  });
+
+  // Diamonds
+  diamonds.forEach(d=>{
+    ctx.save();
+    ctx.translate(d.x,d.y);
+    ctx.rotate(Math.PI/4);
+
+    ctx.shadowBlur=15;
+    ctx.shadowColor="#00ffff";
+    ctx.fillStyle="#00ffff";
+    ctx.fillRect(-d.r,-d.r,d.r*2,d.r*2);
+
+    ctx.restore();
+  });
+
+  ctx.shadowBlur=0;
+
+  // Particles
+  particles.forEach(p=>{
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle="#00eaff";
+    ctx.fillRect(p.x,p.y,4,4);
+  });
+
+  ctx.globalAlpha=1;
+}
+
+function loop(time){
+  if(!running)return;
+
+  const dt=Math.min((time-lastTime)/1000,.05);
+  lastTime=time;
+
+  update(dt);
+  draw();
+
+  if(running)requestAnimationFrame(loop);
+}
+
+function endGame(){
+  running=false;
+  joystick.style.display="none";
+
+  const final=Math.floor(score);
+
+  if(final>best){
+    best=final;
+    localStorage.setItem("neonDashBest",best);
+    bestEl.textContent=best;
+  }
+
+  document.getElementById("finalScore").textContent=final;
+  document.getElementById("finalCoins").textContent=coins;
+
+  gameOver.style.display="flex";
+}
+
+playBtn.addEventListener("click",resetGame);
+againBtn.addEventListener("click",resetGame);
+
+// Joystick
+const center=65;
+const maxDistance=45;
+
+function moveJoystick(clientX){
+  const rect=joystick.getBoundingClientRect();
+
+  let dx=clientX-(rect.left+center);
+
+  dx=Math.max(-maxDistance,Math.min(maxDistance,dx));
+
+  joystickX=dx/maxDistance;
+
+  knob.style.transform=
+    `translate(calc(-50% + ${dx}px), -50%)`;
+}
+
+joystick.addEventListener("pointerdown",e=>{
+  joystickActive=true;
+  joystick.setPointerCapture(e.pointerId);
+  moveJoystick(e.clientX);
+});
+
+joystick.addEventListener("pointermove",e=>{
+  if(joystickActive)moveJoystick(e.clientX);
+});
+
+joystick.addEventListener("pointerup",()=>{
+  joystickActive=false;
+  joystickX=0;
+  knob.style.transform="translate(-50%,-50%)";
+});
+
+joystick.addEventListener("pointercancel",()=>{
+  joystickActive=false;
+  joystickX=0;
+  knob.style.transform="translate(-50%,-50%)";
+});
+
+// Keyboard support
+let left=false;
+let right=false;
+
+window.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft" || e.key.toLowerCase()==="a")left=true;
+  if(e.key==="ArrowRight" || e.key.toLowerCase()==="d")right=true;
+});
+
+window.addEventListener("keyup",e=>{
+  if(e.key==="ArrowLeft" || e.key.toLowerCase()==="a")left=false;
+  if(e.key==="ArrowRight" || e.key.toLowerCase()==="d")right=false;
+});
+
+setInterval(()=>{
+  if(!joystickActive){
+    if(left)joystickX=-1;
+    else if(right)joystickX=1;
+    else joystickX=0;
+  }
+},20);
+</script>
+
+</body>
+</html>
